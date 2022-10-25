@@ -5,13 +5,36 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
-var fp = flag.String("problems", "./problems.csv", "hello")
+var fp = flag.String("problems", "./problems.csv", "Path to CSV containing problems for the quiz")
 
 func main() {
 	flag.Parse()
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT)
+
+	done := make(chan bool, 1)
+
+	go func() {
+		<-sigs
+		done <- true
+	}()
+
+	go func() {
+		quiz()
+		done <- true
+	}()
+
+	<-done
+
+	fmt.Println("\n\033[1;34mThanks for playing!\033[0m")
+}
+
+func quiz() {
 	f, err := os.Open(*fp)
 	if err != nil {
 		fail("reading csv", err)
@@ -25,6 +48,8 @@ func main() {
 	}
 
 	var errs [][]string
+
+	fmt.Printf("\n\033[1;33mIt’s quiz time!\033[0m\n\n")
 
 	for _, q := range qs {
 		fmt.Printf("%v: ", q[0])
@@ -40,7 +65,7 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n\033[1mAnswered %d/%d problems correctly!\033[0m\n\n", len(qs)-len(errs), len(qs))
+	fmt.Printf("\n\033[1mYou answered %d/%d questions correctly!\033[0m\n\n", len(qs)-len(errs), len(qs))
 
 	if len(errs) == 0 {
 		return
