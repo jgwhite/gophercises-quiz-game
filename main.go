@@ -7,9 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 var fp = flag.String("problems", "./problems.csv", "Path to CSV containing problems for the quiz")
+var fd = flag.Int("duration", 30, "Duration of the quiz")
+
+type game struct {
+	questions [][]string
+	answers   []string
+}
 
 func main() {
 	flag.Parse()
@@ -19,65 +26,115 @@ func main() {
 
 	done := make(chan bool, 1)
 
+	game, err := setup()
+	if err != nil {
+		fail(err)
+	}
+
+	// wait for signals
 	go func() {
 		<-sigs
 		done <- true
 	}()
 
+	// wait for game to complete
 	go func() {
-		quiz()
+		game.play()
+		done <- true
+	}()
+
+	// wait for clock to run down
+	go func() {
+		c := 0
+		for range time.Tick(time.Second) {
+			c += 1
+			if c >= *fd {
+				break
+			}
+		}
+		fmt.Printf("\n\n\033[1mTime’s up!\033[0m\n")
 		done <- true
 	}()
 
 	<-done
 
-	fmt.Println("\n\033[1;34mThanks for playing!\033[0m")
+	game.printResults()
+
+	printThanks()
 }
 
-func quiz() {
+func printThanks() {
+	fmt.Println("\033[1mThanks for playing!\033[0m")
+}
+
+func setup() (*game, error) {
 	f, err := os.Open(*fp)
 	if err != nil {
-		fail("reading csv", err)
+		return nil, fmt.Errorf("parsing csv: %v", err)
 	}
 	defer f.Close()
 
 	r := csv.NewReader(f)
 	qs, err := r.ReadAll()
 	if err != nil {
-		fail("parsing csv", err)
+		return nil, fmt.Errorf("parsing csv: %v", err)
 	}
 
-	var errs [][]string
+	return &game{questions: qs}, nil
+}
 
-	fmt.Printf("\n\033[1;33mIt’s quiz time!\033[0m\n\n")
+func (g *game) play() {
+	fmt.Printf("\n\033[1mIt’s quiz time!\033[0m\n\n")
 
-	for _, q := range qs {
+	for i, q := range g.questions {
 		fmt.Printf("%v: ", q[0])
 
 		var a string
 		fmt.Scanf("%s", &a)
 
-		if a == q[1] {
+		g.answers = append(g.answers, a)
+
+		if a == g.questions[i][1] {
 			fmt.Println("\033[1;32mCorrect!\033[0m")
 		} else {
-			errs = append(errs, append(q, a))
 			fmt.Println("\033[1;31mIncorrect!\033[0m")
 		}
 	}
+}
 
-	fmt.Printf("\n\033[1mYou answered %d/%d questions correctly!\033[0m\n\n", len(qs)-len(errs), len(qs))
+func (g *game) printResults() {
+	total := len(g.questions)
+	correct := 0
+
+	var errs [][]string
+
+	for i, q := range g.questions {
+		if len(g.answers) <= i {
+			continue
+		}
+		a := g.answers[i]
+
+		if a != q[1] {
+			errs = append(errs, append(q, a))
+		} else {
+			correct += 1
+		}
+	}
+
+	fmt.Printf("\n\033[1mYou answered %d/%d questions correctly!\033[0m\n\n", correct, total)
 
 	if len(errs) == 0 {
 		return
 	}
 
-	fmt.Println("Errors:")
+	fmt.Println("\033[1mErrors:\033[0m")
 	for _, e := range errs {
 		fmt.Printf("%v: %v (you answered %v)\n", e[0], e[1], e[2])
 	}
+	fmt.Println()
 }
 
-func fail(msg string, err error) {
-	fmt.Fprintf(os.Stderr, "quizgame: %v: %v\n", msg, err)
+func fail(err error) {
+	fmt.Fprintf(os.Stderr, "quizgame: %v\n", err)
 	os.Exit(1)
 }
